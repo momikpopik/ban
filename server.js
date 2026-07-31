@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// 🔥 ВАШИ ДАННЫЕ (уже вставлены)
+// ВАШИ ДАННЫЕ
 const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
@@ -25,7 +25,7 @@ async function getBannedUsers() {
         
         const bannedFile = data.result?.files?.find(f => f.path === 'banned.json');
         if (!bannedFile) {
-            console.log('Файл banned.json не найден, возвращаем пустой список');
+            console.log('Файл banned.json не найден');
             return [];
         }
         
@@ -60,19 +60,40 @@ async function saveBannedUsers(users) {
     return data;
 }
 
+// 🔥 НОВЫЙ JSONP ЭНДПОИНТ
+app.get('/banned-list-jsonp', async (req, res) => {
+    try {
+        const callback = req.query.callback;
+        console.log('JSONP запрос получен, callback:', callback);
+        
+        const users = await getBannedUsers();
+        const data = JSON.stringify({ success: true, users });
+        
+        if (callback) {
+            // JSONP ответ
+            res.setHeader('Content-Type', 'application/javascript');
+            res.send(`${callback}(${data})`);
+        } else {
+            // Обычный JSON ответ
+            res.json({ success: true, users });
+        }
+    } catch (error) {
+        console.error('Ошибка в /banned-list-jsonp:', error);
+        res.status(500).json({ success: false, message: 'Ошибка загрузки' });
+    }
+});
+
 // Эндпоинт для бана
 app.post('/ban-user', async (req, res) => {
     try {
         const { username, reason } = req.body;
-        console.log('Получен запрос на бан:', username, reason);
+        console.log('Получен запрос на бан:', username);
         
         if (!username) {
             return res.status(400).json({ success: false, message: 'Имя пользователя обязательно' });
         }
         
         let bannedUsers = await getBannedUsers();
-        console.log('Текущий бан-лист:', bannedUsers);
-        
         if (bannedUsers.some(u => u.username === username)) {
             return res.json({ success: false, message: `Пользователь ${username} уже в бан-листе` });
         }
@@ -83,29 +104,16 @@ app.post('/ban-user', async (req, res) => {
             date: new Date().toLocaleString('ru-RU')
         };
         bannedUsers.push(newBan);
-        
         await saveBannedUsers(bannedUsers);
-        console.log('Пользователь добавлен в бан-лист');
         
         res.json({ success: true, message: `✅ Пользователь ${username} успешно забанен!` });
     } catch (error) {
-        console.error('Ошибка в /ban-user:', error);
-        res.status(500).json({ success: false, message: 'Внутренняя ошибка сервера: ' + error.message });
+        console.error('Ошибка:', error);
+        res.status(500).json({ success: false, message: 'Внутренняя ошибка сервера' });
     }
 });
 
-// Эндпоинт для получения списка
-app.get('/banned-list', async (req, res) => {
-    try {
-        const users = await getBannedUsers();
-        res.json({ success: true, users });
-    } catch (error) {
-        console.error('Ошибка в /banned-list:', error);
-        res.status(500).json({ success: false, message: 'Ошибка загрузки' });
-    }
-});
-
-// Корневой эндпоинт для проверки работы
+// Корневой эндпоинт
 app.get('/', (req, res) => {
     res.json({ 
         status: 'OK', 
@@ -117,5 +125,4 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
     console.log(`📁 Сайт: ${SITE_NAME}.neocities.org`);
-    console.log(`🔑 API Key: ${API_KEY.substring(0, 10)}...`);
 });
