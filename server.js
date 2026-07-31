@@ -15,7 +15,7 @@ const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
 // ============================================================
-// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА
+// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА (с проверкой на пустой файл)
 // ============================================================
 async function getBannedUsers() {
     try {
@@ -28,9 +28,22 @@ async function getBannedUsers() {
             return [];
         }
         
-        const users = await response.json();
-        console.log(`✅ Загружено пользователей: ${users.length}`);
-        return users;
+        const text = await response.text();
+        console.log(`📄 Содержимое файла (сырое): "${text}"`);
+        
+        if (!text || text.trim() === '') {
+            console.log('⚠️ Файл пустой, возвращаем пустой список');
+            return [];
+        }
+        
+        try {
+            const users = JSON.parse(text);
+            console.log(`✅ Загружено пользователей: ${users.length}`);
+            return users;
+        } catch (parseError) {
+            console.log('⚠️ Ошибка парсинга JSON, возвращаем пустой список');
+            return [];
+        }
     } catch (error) {
         console.error('❌ Ошибка получения бан-листа:', error);
         return [];
@@ -44,21 +57,27 @@ async function saveBannedUsers(users) {
     try {
         console.log('💾 Сохранение бан-листа...');
         
-        const content = JSON.stringify(users, null, 2);
-        console.log('📝 Содержимое:', content);
+        // Убеждаемся, что users - это массив
+        if (!Array.isArray(users)) {
+            users = [];
+        }
         
-        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: указываем путь к файлу
-        const formData = new FormData();
-        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
-        //           👆 ТРЕТИЙ ПАРАМЕТР - ЭТО ИМЯ ФАЙЛА
+        const content = JSON.stringify(users, null, 2);
+        console.log('📝 Содержимое для сохранения:', content);
+        console.log('📝 Длина содержимого:', content.length);
+        
+        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: используем URLSearchParams
+        const params = new URLSearchParams();
+        params.append('file', content);
+        params.append('path', 'banned.json');
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${API_KEY}`,
-                ...formData.getHeaders()
+                'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: formData
+            body: params.toString()
         });
         
         const data = await response.json();
@@ -69,6 +88,28 @@ async function saveBannedUsers(users) {
         }
         
         console.log('✅ Файл banned.json успешно сохранен!');
+        
+        // Проверяем, что файл сохранился с данными
+        console.log('⏳ Ждем 2 секунды перед проверкой...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        console.log('🔍 Проверка файла, статус:', checkResponse.status);
+        if (checkResponse.ok) {
+            const text = await checkResponse.text();
+            console.log('📄 Содержимое после сохранения:', text);
+            if (!text || text.trim() === '') {
+                console.log('⚠️ Файл пустой после сохранения!');
+            } else {
+                try {
+                    const parsed = JSON.parse(text);
+                    console.log(`✅ Файл содержит ${parsed.length} пользователей`);
+                } catch (e) {
+                    console.log('⚠️ Файл содержит невалидный JSON');
+                }
+            }
+        }
+        
         return data;
     } catch (error) {
         console.error('❌ Ошибка сохранения:', error);
@@ -144,12 +185,12 @@ app.get('/ban-user-jsonp', async (req, res) => {
         await saveBannedUsers(bannedUsers);
         console.log('✅ Бан-лист успешно сохранен!');
         
-        // Проверяем, что файл создался
-        const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
-        console.log('🔍 Проверка файла, статус:', checkResponse.status);
-        if (checkResponse.ok) {
-            const content = await checkResponse.text();
-            console.log('📄 Содержимое файла:', content);
+        // Финальная проверка
+        const finalCheck = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        console.log('🔍 Финальная проверка, статус:', finalCheck.status);
+        if (finalCheck.ok) {
+            const text = await finalCheck.text();
+            console.log('📄 Финальное содержимое:', text);
         }
         
         const data = JSON.stringify({
@@ -173,7 +214,26 @@ app.get('/ban-user-jsonp', async (req, res) => {
 });
 
 // ============================================================
-// 5. КОРНЕВОЙ ЭНДПОИНТ
+// 5. ДОПОЛНИТЕЛЬНЫЙ ЭНДПОИНТ ДЛЯ ОТЛАДКИ
+// ============================================================
+app.get('/debug-file', async (req, res) => {
+    try {
+        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        const text = await response.text();
+        res.json({
+            exists: response.ok,
+            status: response.status,
+            content: text,
+            contentLength: text.length,
+            isEmpty: text.trim() === ''
+        });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
+// ============================================================
+// 6. КОРНЕВОЙ ЭНДПОИНТ
 // ============================================================
 app.get('/', (req, res) => {
     res.json({
@@ -183,13 +243,14 @@ app.get('/', (req, res) => {
         endpoints: [
             '/',
             '/banned-list-jsonp?callback=test',
-            '/ban-user-jsonp?username=test&reason=test&callback=test'
+            '/ban-user-jsonp?username=test&reason=test&callback=test',
+            '/debug-file'
         ]
     });
 });
 
 // ============================================================
-// 6. ЗАПУСК
+// 7. ЗАПУСК
 // ============================================================
 app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
