@@ -51,13 +51,12 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ИСПРАВЛЕНО - multipart/form-data)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (НОВАЯ ВЕРСИЯ)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
         console.log('💾 Сохранение бан-листа...');
         
-        // Убеждаемся, что users - это массив
         if (!Array.isArray(users)) {
             users = [];
         }
@@ -66,12 +65,10 @@ async function saveBannedUsers(users) {
         console.log('📝 Содержимое для сохранения:', content);
         console.log('📝 Длина содержимого:', content.length);
         
-        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: используем FormData с multipart/form-data
+        // 🔥 СПОСОБ 1: Простая строка через FormData
         const formData = new FormData();
-        formData.append('file', Buffer.from(content, 'utf-8'), {
-            filename: 'banned.json',
-            contentType: 'application/json'
-        });
+        formData.append('file', content);
+        formData.append('path', 'banned.json');
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
@@ -100,15 +97,15 @@ async function saveBannedUsers(users) {
         if (checkResponse.ok) {
             const text = await checkResponse.text();
             console.log('📄 Содержимое после сохранения:', text);
-            if (!text || text.trim() === '') {
-                console.log('⚠️ Файл пустой после сохранения!');
-            } else {
+            if (text && text.trim() !== '') {
                 try {
                     const parsed = JSON.parse(text);
                     console.log(`✅ Файл содержит ${parsed.length} пользователей`);
                 } catch (e) {
                     console.log('⚠️ Файл содержит невалидный JSON');
                 }
+            } else {
+                console.log('⚠️ Файл пустой после сохранения!');
             }
         }
         
