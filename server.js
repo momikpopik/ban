@@ -15,26 +15,40 @@ const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
 // ============================================================
-// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА
+// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА (ИСПРАВЛЕНО)
 // ============================================================
 async function getBannedUsers() {
     try {
         console.log('📥 Получение бан-листа...');
         
+        // Получаем список файлов
         const response = await fetch(`https://neocities.org/api/list?site=${SITE_NAME}`, {
             headers: { 'Authorization': `Bearer ${API_KEY}` }
         });
         const data = await response.json();
         
-        const bannedFile = data.result?.files?.find(f => f.path === 'banned.json');
+        // Показываем все файлы для отладки
+        if (data.result && data.result.files) {
+            console.log('📋 Все файлы на сайте:');
+            data.result.files.forEach(f => {
+                console.log(`  - ${f.path} (${f.is_directory ? 'папка' : 'файл'})`);
+            });
+        }
+        
+        // Ищем banned.json в КОРНЕ (именно там он сохраняется)
+        let bannedFile = data.result?.files?.find(f => f.path === 'banned.json');
+        
         if (!bannedFile) {
-            console.log('⚠️ Файл banned.json не найден');
+            console.log('⚠️ Файл banned.json не найден в корне');
             return [];
         }
         
+        console.log(`✅ Найден файл: ${bannedFile.path}`);
+        
+        // Скачиваем содержимое
         const fileResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
         if (!fileResponse.ok) {
-            console.log('⚠️ Не удалось скачать файл');
+            console.log(`⚠️ Не удалось скачать файл, статус: ${fileResponse.status}`);
             return [];
         }
         
@@ -48,17 +62,15 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ПРАВИЛЬНАЯ ВЕРСИЯ)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (в корень)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
-        console.log('💾 Сохранение бан-листа...');
+        console.log('💾 Сохранение бан-листа в корень...');
         
-        // Формируем содержимое файла
         const content = JSON.stringify(users, null, 2);
         console.log('📝 Содержимое:', content);
         
-        // 1-й способ: через FormData (рекомендуемый)
         const formData = new FormData();
         formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
         
@@ -78,7 +90,7 @@ async function saveBannedUsers(users) {
             throw new Error(`Upload failed: ${response.status} ${JSON.stringify(data)}`);
         }
         
-        console.log('✅ Файл успешно сохранен!');
+        console.log('✅ Файл успешно сохранен в корень сайта!');
         return data;
     } catch (error) {
         console.error('❌ Ошибка сохранения:', error);
@@ -101,6 +113,7 @@ app.get('/banned-list-jsonp', async (req, res) => {
         const users = await getBannedUsers();
         const data = JSON.stringify({ success: true, users });
         
+        console.log(`📤 Отправка ответа с ${users.length} пользователями`);
         res.setHeader('Content-Type', 'application/javascript');
         res.send(`${callback}(${data})`);
         
@@ -133,18 +146,15 @@ app.get('/ban-user-jsonp', async (req, res) => {
             return res.send(`${callback}(${data})`);
         }
         
-        // Получаем текущий список
         let bannedUsers = await getBannedUsers();
         console.log('📋 Текущий бан-лист:', JSON.stringify(bannedUsers, null, 2));
         
-        // Проверяем дубликат
         if (bannedUsers.some(u => u.username === username)) {
             const data = JSON.stringify({ success: false, message: `${username} уже в бане` });
             res.setHeader('Content-Type', 'application/javascript');
             return res.send(`${callback}(${data})`);
         }
         
-        // Добавляем нового
         const newBan = {
             username: username.trim(),
             reason: reason || 'Не указана',
@@ -153,19 +163,19 @@ app.get('/ban-user-jsonp', async (req, res) => {
         bannedUsers.push(newBan);
         console.log('➕ Добавлен пользователь:', JSON.stringify(newBan, null, 2));
         
-        // Сохраняем
         await saveBannedUsers(bannedUsers);
         console.log('✅ Бан-лист успешно сохранен!');
         
-        // Проверяем, что файл создался
+        // Проверяем, что файл действительно создался
         const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
         console.log('🔍 Проверка файла, статус:', checkResponse.status);
         if (checkResponse.ok) {
             const content = await checkResponse.text();
             console.log('📄 Содержимое файла:', content);
+        } else {
+            console.log('⚠️ Файл не найден после сохранения!');
         }
         
-        // Отправляем ответ
         const data = JSON.stringify({
             success: true,
             message: `✅ Пользователь ${username} успешно забанен!`
