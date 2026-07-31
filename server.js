@@ -15,7 +15,7 @@ const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
 // ============================================================
-// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА (с проверкой на пустой файл)
+// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА
 // ============================================================
 async function getBannedUsers() {
     try {
@@ -51,7 +51,7 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ИСПРАВЛЕНО)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ИСПРАВЛЕНО - multipart/form-data)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
@@ -66,18 +66,20 @@ async function saveBannedUsers(users) {
         console.log('📝 Содержимое для сохранения:', content);
         console.log('📝 Длина содержимого:', content.length);
         
-        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: используем URLSearchParams
-        const params = new URLSearchParams();
-        params.append('file', content);
-        params.append('path', 'banned.json');
+        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: используем FormData с multipart/form-data
+        const formData = new FormData();
+        formData.append('file', Buffer.from(content, 'utf-8'), {
+            filename: 'banned.json',
+            contentType: 'application/json'
+        });
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${API_KEY}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
+                ...formData.getHeaders()
             },
-            body: params.toString()
+            body: formData
         });
         
         const data = await response.json();
