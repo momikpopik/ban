@@ -15,13 +15,15 @@ const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
 // ============================================================
-// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА
+// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА (с обходом кеша)
 // ============================================================
 async function getBannedUsers() {
     try {
         console.log('📥 Получение бан-листа...');
         
-        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        // 🔥 Добавляем параметр кеша
+        const cacheBuster = Date.now();
+        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${cacheBuster}`);
         
         if (!response.ok) {
             console.log(`⚠️ Файл не найден, статус: ${response.status}`);
@@ -51,7 +53,7 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ПРАВИЛЬНАЯ ВЕРСИЯ)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (с принудительной очисткой кеша)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
@@ -61,11 +63,12 @@ async function saveBannedUsers(users) {
             users = [];
         }
         
+        // 🔥 Форсируем обновление файла
         const content = JSON.stringify(users, null, 2);
         console.log('📝 Содержимое для сохранения:', content);
         console.log('📝 Длина содержимого:', content.length);
         
-        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: Только file в FormData
+        // Отправляем запрос на загрузку
         const formData = new FormData();
         formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
         
@@ -87,25 +90,40 @@ async function saveBannedUsers(users) {
         
         console.log('✅ Файл banned.json успешно сохранен!');
         
-        // Проверяем, что файл сохранился с данными
-        console.log('⏳ Ждем 2 секунды перед проверкой...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 🔥 Ждем и пробуем прочитать с обходом кеша несколько раз
+        console.log('⏳ Ожидание и проверка с обходом кеша...');
         
-        const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
-        console.log('🔍 Проверка файла, статус:', checkResponse.status);
-        if (checkResponse.ok) {
-            const text = await checkResponse.text();
-            console.log('📄 Содержимое после сохранения:', text);
-            if (text && text.trim() !== '') {
-                try {
-                    const parsed = JSON.parse(text);
-                    console.log(`✅ Файл содержит ${parsed.length} пользователей`);
-                } catch (e) {
-                    console.log('⚠️ Файл содержит невалидный JSON');
+        let success = false;
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            console.log(`⏳ Попытка ${attempt}/5...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
+            console.log(`🔍 Проверка ${attempt}, статус:`, checkResponse.status);
+            
+            if (checkResponse.ok) {
+                const text = await checkResponse.text();
+                console.log(`📄 Содержимое после сохранения (попытка ${attempt}):`, text);
+                
+                if (text && text.trim() !== '' && text !== '[]') {
+                    try {
+                        const parsed = JSON.parse(text);
+                        console.log(`✅ Файл содержит ${parsed.length} пользователей`);
+                        if (parsed.length > 0) {
+                            success = true;
+                            break;
+                        }
+                    } catch (e) {
+                        console.log('⚠️ Невалидный JSON');
+                    }
+                } else {
+                    console.log('⚠️ Файл пустой, продолжаем ждать...');
                 }
-            } else {
-                console.log('⚠️ Файл пустой после сохранения!');
             }
+        }
+        
+        if (!success) {
+            console.log('⚠️ Предупреждение: файл всё еще пустой после 5 попыток');
         }
         
         return data;
@@ -183,8 +201,8 @@ app.get('/ban-user-jsonp', async (req, res) => {
         await saveBannedUsers(bannedUsers);
         console.log('✅ Бан-лист успешно сохранен!');
         
-        // Финальная проверка
-        const finalCheck = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        // Финальная проверка с обходом кеша
+        const finalCheck = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
         console.log('🔍 Финальная проверка, статус:', finalCheck.status);
         if (finalCheck.ok) {
             const text = await finalCheck.text();
@@ -216,7 +234,7 @@ app.get('/ban-user-jsonp', async (req, res) => {
 // ============================================================
 app.get('/debug-file', async (req, res) => {
     try {
-        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
+        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
         const text = await response.text();
         res.json({
             exists: response.ok,
@@ -231,38 +249,7 @@ app.get('/debug-file', async (req, res) => {
 });
 
 // ============================================================
-// 6. ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ
-// ============================================================
-app.get('/test-upload', async (req, res) => {
-    try {
-        const testData = [{ username: 'test', reason: 'test', date: new Date().toISOString() }];
-        const content = JSON.stringify(testData, null, 2);
-        
-        const formData = new FormData();
-        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
-        
-        const response = await fetch('https://neocities.org/api/upload', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${API_KEY}`,
-                ...formData.getHeaders()
-            },
-            body: formData
-        });
-        
-        const data = await response.json();
-        res.json({ 
-            uploadResult: data,
-            testData: testData,
-            contentLength: content.length
-        });
-    } catch (error) {
-        res.json({ error: error.message });
-    }
-});
-
-// ============================================================
-// 7. КОРНЕВОЙ ЭНДПОИНТ
+// 6. КОРНЕВОЙ ЭНДПОИНТ
 // ============================================================
 app.get('/', (req, res) => {
     res.json({
@@ -273,14 +260,13 @@ app.get('/', (req, res) => {
             '/',
             '/banned-list-jsonp?callback=test',
             '/ban-user-jsonp?username=test&reason=test&callback=test',
-            '/debug-file',
-            '/test-upload'
+            '/debug-file'
         ]
     });
 });
 
 // ============================================================
-// 8. ЗАПУСК
+// 7. ЗАПУСК
 // ============================================================
 app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
