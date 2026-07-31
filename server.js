@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const FormData = require('form-data');
 require('dotenv').config();
 
 const app = express();
@@ -15,15 +14,13 @@ const API_KEY = '3744f057979c6d2524c9cc533f130dbc';
 const SITE_NAME = 'daniilmogila';
 
 // ============================================================
-// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА (с обходом кеша)
+// 1. ПОЛУЧЕНИЕ БАН-ЛИСТА
 // ============================================================
 async function getBannedUsers() {
     try {
         console.log('📥 Получение бан-листа...');
         
-        // 🔥 Добавляем параметр кеша
-        const cacheBuster = Date.now();
-        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${cacheBuster}`);
+        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
         
         if (!response.ok) {
             console.log(`⚠️ Файл не найден, статус: ${response.status}`);
@@ -33,7 +30,7 @@ async function getBannedUsers() {
         const text = await response.text();
         console.log(`📄 Содержимое файла (сырое): "${text}"`);
         
-        if (!text || text.trim() === '') {
+        if (!text || text.trim() === '' || text === '[]') {
             console.log('⚠️ Файл пустой, возвращаем пустой список');
             return [];
         }
@@ -53,7 +50,7 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (с принудительной очисткой кеша)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (АЛЬТЕРНАТИВНЫЙ СПОСОБ)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
@@ -63,22 +60,31 @@ async function saveBannedUsers(users) {
             users = [];
         }
         
-        // 🔥 Форсируем обновление файла
         const content = JSON.stringify(users, null, 2);
         console.log('📝 Содержимое для сохранения:', content);
         console.log('📝 Длина содержимого:', content.length);
         
-        // Отправляем запрос на загрузку
-        const formData = new FormData();
-        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
+        // 🔥 АЛЬТЕРНАТИВНЫЙ СПОСОБ: Используем прямую отправку без библиотеки form-data
+        const boundary = '---------------------------' + Date.now().toString(16);
+        const body = [];
+        
+        body.push(`--${boundary}`);
+        body.push('Content-Disposition: form-data; name="file"; filename="banned.json"');
+        body.push('Content-Type: application/json');
+        body.push('');
+        body.push(content);
+        body.push(`--${boundary}--`);
+        
+        const bodyString = body.join('\r\n');
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${API_KEY}`,
-                ...formData.getHeaders()
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(bodyString).toString()
             },
-            body: formData
+            body: bodyString
         });
         
         const data = await response.json();
@@ -90,40 +96,19 @@ async function saveBannedUsers(users) {
         
         console.log('✅ Файл banned.json успешно сохранен!');
         
-        // 🔥 Ждем и пробуем прочитать с обходом кеша несколько раз
-        console.log('⏳ Ожидание и проверка с обходом кеша...');
-        
-        let success = false;
-        for (let attempt = 1; attempt <= 5; attempt++) {
-            console.log(`⏳ Попытка ${attempt}/5...`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
+        // Проверяем несколько раз
+        console.log('⏳ Проверка файла...');
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
             const checkResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
-            console.log(`🔍 Проверка ${attempt}, статус:`, checkResponse.status);
-            
             if (checkResponse.ok) {
                 const text = await checkResponse.text();
-                console.log(`📄 Содержимое после сохранения (попытка ${attempt}):`, text);
-                
+                console.log(`📄 Попытка ${attempt}:`, text);
                 if (text && text.trim() !== '' && text !== '[]') {
-                    try {
-                        const parsed = JSON.parse(text);
-                        console.log(`✅ Файл содержит ${parsed.length} пользователей`);
-                        if (parsed.length > 0) {
-                            success = true;
-                            break;
-                        }
-                    } catch (e) {
-                        console.log('⚠️ Невалидный JSON');
-                    }
-                } else {
-                    console.log('⚠️ Файл пустой, продолжаем ждать...');
+                    console.log('✅ Файл успешно обновлен!');
+                    break;
                 }
             }
-        }
-        
-        if (!success) {
-            console.log('⚠️ Предупреждение: файл всё еще пустой после 5 попыток');
         }
         
         return data;
@@ -201,14 +186,6 @@ app.get('/ban-user-jsonp', async (req, res) => {
         await saveBannedUsers(bannedUsers);
         console.log('✅ Бан-лист успешно сохранен!');
         
-        // Финальная проверка с обходом кеша
-        const finalCheck = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
-        console.log('🔍 Финальная проверка, статус:', finalCheck.status);
-        if (finalCheck.ok) {
-            const text = await finalCheck.text();
-            console.log('📄 Финальное содержимое:', text);
-        }
-        
         const data = JSON.stringify({
             success: true,
             message: `✅ Пользователь ${username} успешно забанен!`
@@ -230,18 +207,41 @@ app.get('/ban-user-jsonp', async (req, res) => {
 });
 
 // ============================================================
-// 5. ДОПОЛНИТЕЛЬНЫЙ ЭНДПОИНТ ДЛЯ ОТЛАДКИ
+// 5. ТЕСТОВЫЙ ЭНДПОИНТ
 // ============================================================
-app.get('/debug-file', async (req, res) => {
+app.get('/test-upload', async (req, res) => {
     try {
-        const response = await fetch(`https://${SITE_NAME}.neocities.org/banned.json?t=${Date.now()}`);
-        const text = await response.text();
-        res.json({
-            exists: response.ok,
-            status: response.status,
-            content: text,
-            contentLength: text.length,
-            isEmpty: text.trim() === ''
+        const testData = [{ username: 'test', reason: 'test', date: new Date().toISOString() }];
+        const content = JSON.stringify(testData, null, 2);
+        
+        const boundary = '---------------------------' + Date.now().toString(16);
+        const body = [];
+        
+        body.push(`--${boundary}`);
+        body.push('Content-Disposition: form-data; name="file"; filename="banned.json"');
+        body.push('Content-Type: application/json');
+        body.push('');
+        body.push(content);
+        body.push(`--${boundary}--`);
+        
+        const bodyString = body.join('\r\n');
+        
+        const response = await fetch('https://neocities.org/api/upload', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${API_KEY}`,
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(bodyString).toString()
+            },
+            body: bodyString
+        });
+        
+        const data = await response.json();
+        res.json({ 
+            uploadResult: data,
+            testData: testData,
+            contentLength: content.length,
+            bodyLength: bodyString.length
         });
     } catch (error) {
         res.json({ error: error.message });
@@ -260,7 +260,7 @@ app.get('/', (req, res) => {
             '/',
             '/banned-list-jsonp?callback=test',
             '/ban-user-jsonp?username=test&reason=test&callback=test',
-            '/debug-file'
+            '/test-upload'
         ]
     });
 });
