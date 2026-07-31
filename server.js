@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const FormData = require('form-data');
 require('dotenv').config();
 
 const app = express();
@@ -20,23 +21,20 @@ async function getBannedUsers() {
     try {
         console.log('📥 Получение бан-листа...');
         
-        // Проверяем наличие файла через API list
         const response = await fetch(`https://neocities.org/api/list?site=${SITE_NAME}`, {
             headers: { 'Authorization': `Bearer ${API_KEY}` }
         });
         const data = await response.json();
         
-        // Ищем файл banned.json в корне сайта
         const bannedFile = data.result?.files?.find(f => f.path === 'banned.json');
         if (!bannedFile) {
-            console.log('⚠️ Файл banned.json не найден, возвращаем пустой список');
+            console.log('⚠️ Файл banned.json не найден');
             return [];
         }
         
-        // Скачиваем содержимое файла
         const fileResponse = await fetch(`https://${SITE_NAME}.neocities.org/banned.json`);
         if (!fileResponse.ok) {
-            console.log('⚠️ Не удалось скачать файл, возвращаем пустой список');
+            console.log('⚠️ Не удалось скачать файл');
             return [];
         }
         
@@ -50,28 +48,27 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ИСПРАВЛЕНО)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ПРАВИЛЬНАЯ ВЕРСИЯ)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
         console.log('💾 Сохранение бан-листа...');
-        console.log('📝 Данные для сохранения:', JSON.stringify(users, null, 2));
         
         // Формируем содержимое файла
         const content = JSON.stringify(users, null, 2);
+        console.log('📝 Содержимое:', content);
         
-        // Отправляем запрос на загрузку файла
-        const formData = new URLSearchParams();
-        formData.append('file', content);
-        formData.append('path', 'banned.json'); // ← ВАЖНО: правильный путь
+        // 1-й способ: через FormData (рекомендуемый)
+        const formData = new FormData();
+        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${API_KEY}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
+                ...formData.getHeaders()
             },
-            body: formData.toString()
+            body: formData
         });
         
         const data = await response.json();
@@ -119,7 +116,7 @@ app.get('/banned-list-jsonp', async (req, res) => {
 });
 
 // ============================================================
-// 4. JSONP - БАН ПОЛЬЗОВАТЕЛЯ (ИСПРАВЛЕНО)
+// 4. JSONP - БАН ПОЛЬЗОВАТЕЛЯ
 // ============================================================
 app.get('/ban-user-jsonp', async (req, res) => {
     try {
