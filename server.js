@@ -51,7 +51,7 @@ async function getBannedUsers() {
 }
 
 // ============================================================
-// 2. СОХРАНЕНИЕ БАН-ЛИСТА (НОВАЯ ВЕРСИЯ)
+// 2. СОХРАНЕНИЕ БАН-ЛИСТА (ПРАВИЛЬНАЯ ВЕРСИЯ)
 // ============================================================
 async function saveBannedUsers(users) {
     try {
@@ -65,10 +65,9 @@ async function saveBannedUsers(users) {
         console.log('📝 Содержимое для сохранения:', content);
         console.log('📝 Длина содержимого:', content.length);
         
-        // 🔥 СПОСОБ 1: Простая строка через FormData
+        // 🔥 ПРАВИЛЬНЫЙ СПОСОБ: Только file в FormData
         const formData = new FormData();
-        formData.append('file', content);
-        formData.append('path', 'banned.json');
+        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
         
         const response = await fetch('https://neocities.org/api/upload', {
             method: 'POST',
@@ -232,7 +231,38 @@ app.get('/debug-file', async (req, res) => {
 });
 
 // ============================================================
-// 6. КОРНЕВОЙ ЭНДПОИНТ
+// 6. ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ
+// ============================================================
+app.get('/test-upload', async (req, res) => {
+    try {
+        const testData = [{ username: 'test', reason: 'test', date: new Date().toISOString() }];
+        const content = JSON.stringify(testData, null, 2);
+        
+        const formData = new FormData();
+        formData.append('file', Buffer.from(content, 'utf-8'), 'banned.json');
+        
+        const response = await fetch('https://neocities.org/api/upload', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${API_KEY}`,
+                ...formData.getHeaders()
+            },
+            body: formData
+        });
+        
+        const data = await response.json();
+        res.json({ 
+            uploadResult: data,
+            testData: testData,
+            contentLength: content.length
+        });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
+// ============================================================
+// 7. КОРНЕВОЙ ЭНДПОИНТ
 // ============================================================
 app.get('/', (req, res) => {
     res.json({
@@ -243,13 +273,14 @@ app.get('/', (req, res) => {
             '/',
             '/banned-list-jsonp?callback=test',
             '/ban-user-jsonp?username=test&reason=test&callback=test',
-            '/debug-file'
+            '/debug-file',
+            '/test-upload'
         ]
     });
 });
 
 // ============================================================
-// 7. ЗАПУСК
+// 8. ЗАПУСК
 // ============================================================
 app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
